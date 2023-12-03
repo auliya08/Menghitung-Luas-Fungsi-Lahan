@@ -1,0 +1,148 @@
+Map.addLayer(table, {}, 'mataram', true)
+
+//zoompeta
+Map.centerObject(table, 10);
+
+var maskL8 = function(image) {
+  var qa = image.select('BQA');
+  var mask = qa.bitwiseAnd(1 << 4).eq(0);
+  return image.updateMask(mask);
+}
+
+var composite = ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA')
+        .filterDate('2021-01-01', '2021-12-31')
+         .map(maskL8)
+          .median()
+          .clip(table);
+          
+//visualisasi citra
+var RGBTrue = composite.select(['B4', 'B3', 'B2']);
+var RGBparam = { min: 0, max: 0.3,};
+Map.addLayer(RGBTrue, RGBparam, '2021');
+
+var aoi = Lahan_Terbangun.merge(Lahan_terbuka).merge(Pertanian)
+.merge(Vegetasi).merge(Badan_Air);
+
+var bands = ['B1','B2','B3','B4','B5','B6','B7'];
+
+var training = composite.select(bands).sampleRegions({
+collection: aoi,
+properties: ['LC'],
+scale: 30
+});
+
+var classifier = ee.Classifier.smileCart().train({
+features: training,
+classProperty: 'LC',
+inputProperties: bands
+});
+
+var classified = composite.select(bands).classify(classifier);
+
+Map.addLayer(classified,
+{min: 0, max: 6, palette:['#fcff35','#d67317','#23ab31','#d60e0a','#061bd6']},
+'tutupanlahan');
+
+var uji_aoi = Uji_Lahan_Terbangun.merge(Uji_Lahan_Terbuka).merge(Uji_Pertanian).merge(Uji_Vegetasi).merge(Uji_Badan_Air)
+
+var validasi = classified.sampleRegions({
+  collection: uji_aoi,
+  properties: ['LC'],
+  scale: 30,
+});
+print(validasi);
+
+var akurasi = validasi.errorMatrix('LC', 'classification');
+print('Confusion matrix', akurasi);
+print('Overall accuracy: ', akurasi.accuracy());
+
+var class_areas = ee.Image.pixelArea().divide(1000*1000).addBands(classified)
+  .reduceRegion({
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'code',
+    }),
+    geometry: table,
+    maxPixels : 500000000,
+    scale: 30,
+  }).get('groups');
+  
+print(class_areas);
+
+//Add Title and Legends
+ //Title //
+Map.add(ui.Label(
+    '2021 Land Cover Map Kota Mataram',  {
+      fontWeight: 'bold', BackgroundColor: 'FBF9F5',fontSize: '14px'}));
+      
+ // legend //
+ var names = ['Lahan_Terbangun', 'Lahan_terbuka', 'Pertanian', 'Vegetasi', 'Badan_air'];
+
+var values = [ '0', '1', '2', '3', '4'];
+    
+var legendsPalette = ['yellow','brown','green','red','white'];
+
+// set position of panel
+var legend = ui.Panel({style: { position: 'bottom-left', padding: '8px 15px'}});
+ 
+// Create legend title
+var legendTitle = ui.Label({value: 'Land Cover Legends ',style: {
+  fontWeight: 'bold', fontSize: '18px', margin: '0 0 4px 0', padding: '0' }});
+  
+// Add the title to the panel
+//legend.add(legendTitle);
+
+// Add the legend to the map.
+//Map.add(legend);
+
+Map.addLayer(table, LC, 'My Classification')
+
+var panel = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '5px;'
+  }
+})
+
+var title = ui.Label({
+  value: 'Classification',
+  style: {
+    fontSize: '14px',
+    fontWeight: 'bold',
+    margin: '0px;'
+  }
+})
+
+panel.add(title)
+
+var color = ['#fcff35','#d67317','#23ab31','#d60e0a','#061bd6']
+var LC = ['Lahan_Terbangun', 'Lahan_terbuka', 'Pertanian', 'Vegetasi', 'Badan_air']
+
+var list_legend = function(color, description) {
+  
+  var c = ui.Label({
+    style: {
+      backgroundColor: color,
+      padding: '10px',
+      margin: '4px'
+    }
+  })
+  
+  var ds = ui.Label({
+    value: description,
+    style: {
+      margin: '5px'
+    }
+  })
+  
+  return ui.Panel({
+    widgets: [c, ds],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  })
+}
+
+for(var a = 0; a < 5; a++){
+  panel.add(list_legend(color[a], LC[a]))
+}
+
+Map.add(panel)
